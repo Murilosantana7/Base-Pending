@@ -70,7 +70,7 @@ async def main():
             await page.wait_for_load_state("networkidle", timeout=20000)
 
             try:
-                await page.locator('.ssc-dialog-close').click(timeout=5000)
+                await page.locator('.ssc-dialog-close').click(timeout=10000)
             except:
                 print("Nenhum pop-up foi encontrado.")
                 await page.keyboard.press("Escape")
@@ -78,11 +78,11 @@ async def main():
             # ================== DOWNLOAD: PENDING ==================
             print("\nIniciando Download: Base Pending")
             await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip")
-            await page.wait_for_timeout(10000)
+            await page.wait_for_timeout(15000)
 
             # Clicando no botão de exportação (assumindo que já está no filtro "Pending" por padrão)
             await page.get_by_role("button", name="Exportar").nth(0).click()
-            await page.wait_for_timeout(12000)
+            await page.wait_for_timeout(15000)
 
             await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
             await page.wait_for_timeout(15000)
