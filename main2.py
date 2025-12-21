@@ -72,7 +72,7 @@ async def main():
 
             # ================== TRATAMENTO DE POP-UP (ATUALIZADO) ==================
             print("⏳ Aguardando renderização do pop-up...")
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(8000)
 
             print("🧹 Verificando existência de pop-ups...")
             
