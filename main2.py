@@ -62,6 +62,7 @@ async def main():
 
         try:
             # LOGIN
+            print("🔐 Fazendo login no SPX...")
             await page.goto("https://spx.shopee.com.br/")
             await page.wait_for_selector('xpath=//*[@placeholder="Ops ID"]', timeout=10000)
             await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops113074')
@@ -69,26 +70,65 @@ async def main():
             await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
             await page.wait_for_load_state("networkidle", timeout=20000)
 
-            try:
-                await page.locator('.ssc-dialog-close').click(timeout=10000)
-            except:
-                print("Nenhum pop-up foi encontrado.")
-                await page.keyboard.press("Escape")
+            # ================== TRATAMENTO DE POP-UP (ATUALIZADO) ==================
+            print("⏳ Aguardando renderização do pop-up...")
+            await page.wait_for_timeout(5000)
+
+            print("🧹 Verificando existência de pop-ups...")
+            
+            # Lista de seletores incluindo o wrapper que descobrimos no print
+            possible_close_buttons = [
+                ".ssc-dialog-close-icon-wrapper", # O seletor correto da sua imagem
+                ".ssc-dialog-close",            
+                ".ant-modal-close",             
+                ".ant-modal-close-x",           
+                "button[aria-label='Close']",   
+                ".ssc-modal-close"              
+            ]
+
+            popup_closed = False
+            
+            # 1. Tenta clicar no botão X
+            for selector in possible_close_buttons:
+                if await page.locator(selector).is_visible():
+                    print(f"⚠️ Pop-up detectado! Fechando com: {selector}")
+                    try:
+                        await page.locator(selector).click()
+                        popup_closed = True
+                        await page.wait_for_timeout(1000)
+                        break
+                    except Exception as e:
+                        print(f"Erro ao tentar clicar em {selector}: {e}")
+
+            # 2. Se não fechou, garante o foco e usa ESC
+            if not popup_closed:
+                print("➡️ Botão não encontrado. Tentando ESC forçado...")
+                try:
+                    await page.mouse.click(10, 10) # Garante foco na janela
+                    await page.keyboard.press("Escape")
+                except Exception as e:
+                    print(f"Erro ao pressionar ESC: {e}")
+            
+            await page.wait_for_timeout(2000)
+            # =======================================================================
 
             # ================== DOWNLOAD: PENDING ==================
             print("\nIniciando Download: Base Pending")
             await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip")
             await page.wait_for_timeout(12000)
 
-            # Clicando no botão de exportação (assumindo que já está no filtro "Pending" por padrão)
+            # Clicando no botão de exportação (Exporta o filtro atual/padrão)
+            print("📤 Clicando em exportar...")
             await page.get_by_role("button", name="Exportar").nth(0).click()
             await page.wait_for_timeout(12000)
 
+            print("📂 Indo para o centro de tarefas...")
             await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
             await page.wait_for_timeout(15000)
             await page.get_by_text("Exportar tarefa").click()
 
-            async with page.expect_download() as download_info:
+            print("⬇️ Aguardando download...")
+            async with page.expect_download(timeout=60000) as download_info:
                 await page.get_by_role("button", name="Baixar").nth(0).click()
 
             download = await download_info.value
@@ -99,10 +139,12 @@ async def main():
             if new_file_path:
                 update_packing_google_sheets(new_file_path)
 
-            print("\n✅ Processo concluído com sucesso.")
+            print("\n✅ Processo Base Pending concluído com sucesso.")
 
         except Exception as e:
             print(f"❌ Erro fatal durante o processo: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             await browser.close()
 
