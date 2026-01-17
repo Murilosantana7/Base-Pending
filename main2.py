@@ -9,8 +9,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 from playwright.async_api import async_playwright
 
 # ================= CONFIGURAÇÕES =================
-DOWNLOAD_DIR = "/tmp" # Ou um caminho absoluto no Windows se for rodar local
-HEADLESS_MODE = False # Mude para True quando rodar no servidor/GitHub Actions
+DOWNLOAD_DIR = "/tmp" 
+HEADLESS_MODE = True # Voltei para True pois vi que você roda no runner do GitHub
 CREDENTIALS_FILE = "hxh.json"
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1LZ8WUrgN36Hk39f7qDrsRwvvIy1tRXLVbl3-wSQn-Pc/edit#gid=734921183"
 
@@ -45,14 +45,12 @@ def update_packing_google_sheets(csv_file_path):
         sheet = client.open_by_url(SHEET_URL)
         worksheet = sheet.worksheet("Base Pending")
         
-        # Leitura robusta do CSV (trata arquivos vazios ou erros de encoding)
         try:
             df = pd.read_csv(csv_file_path).fillna("")
         except pd.errors.EmptyDataError:
             print("⚠️ O arquivo CSV baixado está vazio. Pulando upload.")
             return
 
-        # Limpa e atualiza em uma única transação para evitar "piscar" a planilha
         worksheet.clear()
         if not df.empty:
             worksheet.update([df.columns.values.tolist()] + df.values.tolist())
@@ -68,86 +66,93 @@ async def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=HEADLESS_MODE, args=["--start-maximized"])
+        # Adicionei argumentos para evitar detecção de bot e melhorar estabilidade no Linux
+        browser = await p.chromium.launch(
+            headless=HEADLESS_MODE, 
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--start-maximized"]
+        )
         context = await browser.new_context(accept_downloads=True, viewport={'width': 1920, 'height': 1080})
         page = await context.new_page()
 
         try:
-            # --- LOGIN OTIMIZADO ---
+            # --- LOGIN (Revertido para o Original) ---
             print("🔐 Acessando SPX...")
             await page.goto("https://spx.shopee.com.br/", wait_until="networkidle")
             
-            # Seletores mais inteligentes (sem XPath complexo)
-            await page.get_by_placeholder("Ops ID").fill('Ops113074')
-            await page.get_by_placeholder("Senha").fill('@Shopee123')
+            # Usando seus XPaths originais que sabemos que funcionam
+            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops113074')
+            await page.locator('xpath=//*[@placeholder="Senha"]').fill('@Shopee123')
             
-            # Clica no botão de login e espera a navegação completar
-            await page.get_by_role("button", name="Login").click() # Ajuste "name" se o texto do botão for diferente
-            # Se o botão não tiver texto claro, use a classe: page.locator(".login-btn-class")
+            print("🔑 Clicando no botão de login...")
+            # XPath original do botão
+            await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
             
+            # --- TRATAMENTO DE POP-UP ---
             print("⏳ Verificando pop-ups...")
-            # --- TRATAMENTO DE POP-UP RÁPIDO ---
-            # Espera no máximo 5s pelo pop-up. Se não aparecer, segue.
             try:
-                # Seletor genérico para botão de fechar modal
+                # Espera curta para pop-up
                 close_btn = page.locator(".ssc-dialog-close-icon-wrapper, .ant-modal-close, svg.ssc-dialog-close").first
-                await close_btn.wait_for(state="visible", timeout=5000)
+                await close_btn.wait_for(state="visible", timeout=8000)
                 await close_btn.click()
                 print("✅ Pop-up fechado.")
             except:
-                print("ℹ️ Nenhum pop-up detectado (ou fechou sozinho). Seguindo...")
+                print("ℹ️ Nenhum pop-up detectado. Seguindo...")
 
-            # --- DOWNLOAD FLOW ---
+            # --- NAVEGAÇÃO ---
             print("\n🚚 Acessando página de Viagens...")
             await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip", wait_until="domcontentloaded")
-            
-            # Espera botão Exportar estar visível e clicável
+            await page.wait_for_timeout(3000) # Pequeno respiro para SPA carregar
+
             print("📤 Solicitando exportação...")
-            export_btn = page.get_by_role("button", name="Exportar").first
-            await export_btn.wait_for(state="visible")
-            await export_btn.click()
+            # Tenta clicar no Exportar
+            try:
+                await page.get_by_role("button", name="Exportar").first.click()
+            except:
+                # Fallback se o botão mudar
+                await page.locator('button:has-text("Exportar")').click()
             
-            # Pequena espera técnica para o backend registrar a solicitação (necessário em SPAs)
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(3000) 
 
             print("📂 Indo para Centro de Tarefas...")
-            await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter", wait_until="domcontentloaded")
+            await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter", wait_until="networkidle")
             
-            # Seleciona aba com espera inteligente
+            # Seleção da aba
             print("Checking abas...")
-            tab_locator = page.locator('text="Exportar tarefa"')
-            await tab_locator.wait_for(state="visible", timeout=10000)
-            await tab_locator.click() # Geralmente click simples funciona aqui se esperou visible
+            try:
+                await page.locator('text="Exportar tarefa"').click(timeout=10000)
+            except:
+                print("⚠️ Aba não clicável ou já ativa.")
 
             print("⬇️ Buscando botão 'Baixar'...")
-            # Espera pelo botão de Baixar aparecer na lista (pode demorar se o relatório for grande)
             download_btn = page.get_by_role("button", name="Baixar").first
             
-            try:
-                # Espera até 60s para o botão aparecer (o processamento do relatório pode demorar)
-                await download_btn.wait_for(state="visible", timeout=60000)
-            except:
-                print("⚠️ Botão baixar não apareceu em 60s. Tentando recarregar a página...")
-                await page.reload()
-                await download_btn.wait_for(state="visible", timeout=30000)
+            # Espera botão ficar visível
+            await download_btn.wait_for(state="visible", timeout=60000)
 
-            # --- O DOWNLOAD SEGURO ---
+            # --- DOWNLOAD COM CLIQUE FORÇADO (Correção da Imagem 1) ---
+            print("🖱️ Tentando baixar...")
             async with page.expect_download(timeout=60000) as download_info:
-                # AQUI ESTÁ A CORREÇÃO PRINCIPAL: Force=True e JS Fallback
+                # Tenta 3 estratégias de clique em sequência
                 try:
-                    await download_btn.click(force=True)
+                    # 1. Clique forçado do Playwright
+                    await download_btn.click(force=True, timeout=5000)
                 except:
-                    print("⚠️ Click padrão falhou, forçando via JS...")
-                    await download_btn.evaluate("el => el.click()")
+                    print("⚠️ Click padrão falhou, tentando JS...")
+                    try:
+                        # 2. Clique via JavaScript (infalível para sobreposições)
+                        await download_btn.evaluate("el => el.click()")
+                    except:
+                        # 3. Disparar evento de click nativo
+                        await download_btn.dispatch_event("click")
 
             download = await download_info.value
-            temp_path = await download.path() # Caminho temporário seguro
+            temp_path = await download.path()
             final_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
             shutil.move(temp_path, final_path)
             
-            print(f"✅ Download original salvo: {final_path}")
+            print(f"✅ Download salvo: {final_path}")
 
-            # Processamento final
+            # Processamento
             renamed_path = rename_downloaded_file(DOWNLOAD_DIR, final_path)
             if renamed_path:
                 update_packing_google_sheets(renamed_path)
@@ -155,7 +160,7 @@ async def main():
             print("\n🎉 Processo finalizado com sucesso!")
 
         except Exception as e:
-            print(f"\n❌ ERRO CRÍTICO NO SCRIPT:")
+            print(f"\n❌ ERRO CRÍTICO:")
             traceback.print_exc()
         finally:
             await context.close()
