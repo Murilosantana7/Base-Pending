@@ -87,8 +87,6 @@ async def main():
                 
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(500)
-                # Verifica se ainda tem algo bloqueando (opcional, mas vamos tentar garantir)
-                # Se funcionar, ótimo. Se não, seguimos para os botões.
             except Exception as e:
                 print(f"Erro no ESC: {e}")
 
@@ -101,8 +99,8 @@ async def main():
             possible_buttons = [
                 ".ssc-dialog-header .ssc-dialog-close-icon-wrapper", # O da imagem (Mais provável)
                 ".ssc-dialog-close-icon-wrapper",
-                "svg.ssc-dialog-close",            
-                ".ant-modal-close",              
+                "svg.ssc-dialog-close",             
+                ".ant-modal-close",               
                 ".ant-modal-close-x",
                 "[aria-label='Close']"
             ]
@@ -155,7 +153,11 @@ async def main():
             print("📂 Indo para o centro de tarefas...")
             await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
             await page.wait_for_timeout(15000)
-            await page.get_by_text("Exportar tarefa").click()
+            
+            # === ATUALIZAÇÃO AQUI ===
+            # Tenta clicar em "Exportar tarefa" (PT) ou "Export Task" (EN)
+            print("👆 Selecionando aba de exportação...")
+            await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click()
 
             print("⬇️ Aguardando download...")
             async with page.expect_download(timeout=60000) as download_info:
