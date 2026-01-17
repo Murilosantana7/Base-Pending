@@ -158,7 +158,7 @@ async def main():
             await page.get_by_text("Exportar tarefa").click()
 
             print("⬇️ Aguardando download...")
-            async with page.expect_download(timeout=60000) as download_info:
+            async with page.expect_download(timeout=80000) as download_info:
                 await page.get_by_role("button", name="Baixar").nth(0).click()
 
             download = await download_info.value
