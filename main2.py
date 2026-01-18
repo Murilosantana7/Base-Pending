@@ -71,16 +71,15 @@ async def main():
             
             await page.wait_for_load_state("networkidle", timeout=40000)
 
-            # ================== TRATAMENTO DE POP-UP (REORDENADO) ==================
+            # ================== TRATAMENTO DE POP-UP ==================
             print("⏳ Aguardando renderização do pop-up (10s)...")
             await page.wait_for_timeout(10000) 
 
             popup_closed = False
 
-            # --- OPÇÃO 1: TECLA ESC (PRIORIDADE) ---
+            # --- OPÇÃO 1: TECLA ESC ---
             print("1️⃣ Tentativa 1: Pressionando ESC (Método Rápido)...")
             try:
-                # Clica no centro para garantir foco
                 viewport = page.viewport_size
                 if viewport:
                     await page.mouse.click(viewport['width'] / 2, viewport['height'] / 2)
@@ -92,12 +91,10 @@ async def main():
 
             await page.wait_for_timeout(1000)
 
-            # --- OPÇÃO 2: BOTÕES (FALLBACK / SEGUNDA OPÇÃO) ---
+            # --- OPÇÃO 2: BOTÕES ---
             print("2️⃣ Tentativa 2: Procurando botões de fechar...")
-            
-            # Lista completa: O específico da imagem + genéricos
             possible_buttons = [
-                ".ssc-dialog-header .ssc-dialog-close-icon-wrapper", # O da imagem (Mais provável)
+                ".ssc-dialog-header .ssc-dialog-close-icon-wrapper",
                 ".ssc-dialog-close-icon-wrapper",
                 "svg.ssc-dialog-close",             
                 ".ant-modal-close",               
@@ -109,13 +106,11 @@ async def main():
                 if await page.locator(selector).count() > 0:
                     print(f"⚠️ Botão encontrado: {selector}")
                     try:
-                        # Tenta clique JS primeiro (mais forte)
                         await page.locator(selector).first.evaluate("element => element.click()")
                         print("✅ Clique JS realizado no botão.")
                         popup_closed = True
                         break
                     except:
-                        # Se falhar, tenta clique normal forçado
                         try:
                             await page.locator(selector).first.click(force=True)
                             print("✅ Clique forçado realizado.")
@@ -124,7 +119,7 @@ async def main():
                         except Exception as e:
                             print(f"Falha ao clicar em {selector}: {e}")
             
-            # --- OPÇÃO 3: MÁSCARA/FUNDO (ÚLTIMO RECURSO) ---
+            # --- OPÇÃO 3: MÁSCARA/FUNDO ---
             if not popup_closed:
                 print("3️⃣ Tentativa 3: Clicando no fundo escuro...")
                 masks = [".ant-modal-mask", ".ssc-dialog-mask", ".ssc-modal-mask"]
@@ -138,14 +133,14 @@ async def main():
                             pass
             
             await page.wait_for_timeout(2000)
-            # =======================================================================
+            # ==========================================================
 
             # ================== DOWNLOAD: PENDING ==================
             print("\nIniciando Download: Base Pending")
             await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip")
             await page.wait_for_timeout(12000)
 
-            # Clicando no botão de exportação
+            # Clicando no botão de exportação inicial
             print("📤 Clicando em exportar...")
             await page.get_by_role("button", name="Exportar").nth(0).click()
             await page.wait_for_timeout(12000)
@@ -154,14 +149,20 @@ async def main():
             await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
             await page.wait_for_timeout(15000)
             
-            # === ATUALIZAÇÃO AQUI ===
-            # Tenta clicar em "Exportar tarefa" (PT) ou "Export Task" (EN)
+            # === CORREÇÃO DE TIMEOUT ===
             print("👆 Selecionando aba de exportação...")
-            await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click()
+            try:
+                # Usamos force=True para ignorar sobreposições.
+                # Usamos timeout curto (5s) pois se falhar, provavelmente já estamos na aba certa.
+                await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click(force=True, timeout=5000)
+                print("✅ Aba selecionada/focada.")
+            except Exception as e:
+                print(f"⚠️ Aviso (Não crítico): Não foi possível clicar na aba 'Exportar tarefa'. Tentando baixar direto... Erro: {e}")
 
             print("⬇️ Aguardando download...")
             async with page.expect_download(timeout=60000) as download_info:
-                await page.get_by_role("button", name="Baixar").nth(0).click()
+                # force=True aqui também para garantir o clique no botão Baixar
+                await page.get_by_role("button", name="Baixar").nth(0).click(force=True)
 
             download = await download_info.value
             download_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
