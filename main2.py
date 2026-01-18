@@ -6,196 +6,113 @@ import shutil
 import gspread
 import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
-
-DOWNLOAD_DIR = "/tmp"
+import re
 
 # ==============================
-# Função de renomear arquivo
+# Configuração de Ambiente
 # ==============================
-def rename_downloaded_file(download_dir, download_path):
+DOWNLOAD_DIR = "/tmp" 
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+def rename_downloaded_file_handover(download_dir, download_path):
     try:
         current_hour = datetime.now().strftime("%H")
-        new_file_name = f"PEND-{current_hour}.csv"
+        new_file_name = f"PROD-{current_hour}.csv"
         new_file_path = os.path.join(download_dir, new_file_name)
-        if os.path.exists(new_file_path):
-            os.remove(new_file_path)
+        if os.path.exists(new_file_path): os.remove(new_file_path)
         shutil.move(download_path, new_file_path)
-        print(f"Arquivo salvo como: {new_file_path}")
+        print(f"✅ Arquivo salvo: {new_file_name}")
         return new_file_path
     except Exception as e:
-        print(f"Erro ao renomear o arquivo: {e}")
+        print(f"❌ Erro ao renomear: {e}")
         return None
 
-
-# ==============================
-# Função de atualização Google Sheets
-# ==============================
-def update_packing_google_sheets(csv_file_path):
+def update_google_sheets_handover(csv_file_path):
     try:
-        if not os.path.exists(csv_file_path):
-            print(f"Arquivo {csv_file_path} não encontrado.")
-            return
+        if not os.path.exists(csv_file_path): return
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name("hxh.json", scope)
         client = gspread.authorize(creds)
-        sheet1 = client.open_by_url(
-            "https://docs.google.com/spreadsheets/d/1LZ8WUrgN36Hk39f7qDrsRwvvIy1tRXLVbl3-wSQn-Pc/edit#gid=734921183"
-        )
-        worksheet1 = sheet1.worksheet("Base Pending")
+        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LZ8WUrgN36Hk39f7qDrsRwvvIy1tRXLVbl3-wSQn-Pc/edit#gid=734921183")
+        worksheet = sheet.worksheet("Base Handedover")
         df = pd.read_csv(csv_file_path).fillna("")
-        worksheet1.clear()
-        worksheet1.update([df.columns.values.tolist()] + df.values.tolist())
-        print(f"Arquivo enviado com sucesso para a aba 'Base Pending'.")
+        worksheet.clear()
+        worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+        print("✅ Google Sheets atualizado com sucesso!")
     except Exception as e:
-        print(f"Erro durante o processo: {e}")
+        print(f"❌ Erro no Sheets: {e}")
 
-
-# ==============================
-# Fluxo principal Playwright
-# ==============================
 async def main():
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        # Viewport maior para garantir que a tabela renderize
+        # headless=True para GitHub Actions
+        browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(accept_downloads=True, viewport={'width': 1366, 'height': 768})
         page = await context.new_page()
 
+        # Bloqueio de imagens para performance
+        await page.route("**/*.{png,jpg,jpeg,svg,gif}", lambda route: route.abort())
+
         try:
-            # LOGIN
-            print("🔐 Fazendo login no SPX...")
-            await page.goto("https://spx.shopee.com.br/")
-            await page.wait_for_selector('xpath=//*[@placeholder="Ops ID"]', timeout=10000)
-            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops113074')
-            await page.locator('xpath=//*[@placeholder="Senha"]').fill('@Shopee123')
-            await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
+            # 1. LOGIN (Credencial Handedover)
+            print("🔐 Iniciando Login (Ops134294)...")
+            await page.goto("https://spx.shopee.com.br/", wait_until="commit", timeout=120000)
             
-            await page.wait_for_load_state("networkidle", timeout=40000)
-
-            # ================== TRATAMENTO DE POP-UP ==================
-            print("⏳ Aguardando renderização do pop-up (10s)...")
-            await page.wait_for_timeout(10000) 
-
-            popup_closed = False
-
-            # --- OPÇÃO 1: TECLA ESC ---
-            print("1️⃣ Tentativa 1: Pressionando ESC...")
-            try:
-                viewport = page.viewport_size
-                if viewport:
-                    await page.mouse.click(viewport['width'] / 2, viewport['height'] / 2)
-                
-                await page.keyboard.press("Escape")
-                await page.wait_for_timeout(500)
-            except Exception as e:
-                print(f"Erro no ESC: {e}")
-
-            await page.wait_for_timeout(1000)
-
-            # --- OPÇÃO 2: BOTÕES ---
-            print("2️⃣ Tentativa 2: Procurando botões de fechar...")
-            possible_buttons = [
-                ".ssc-dialog-header .ssc-dialog-close-icon-wrapper",
-                ".ssc-dialog-close-icon-wrapper",
-                "svg.ssc-dialog-close",             
-                ".ant-modal-close",               
-                ".ant-modal-close-x",
-                "[aria-label='Close']"
-            ]
-
-            for selector in possible_buttons:
-                if await page.locator(selector).count() > 0:
-                    print(f"⚠️ Botão encontrado: {selector}")
-                    try:
-                        await page.locator(selector).first.evaluate("element => element.click()")
-                        print("✅ Clique JS realizado no botão.")
-                        popup_closed = True
-                        break
-                    except:
-                        try:
-                            await page.locator(selector).first.click(force=True)
-                            print("✅ Clique forçado realizado.")
-                            popup_closed = True
-                            break
-                        except Exception as e:
-                            print(f"Falha ao clicar em {selector}: {e}")
+            # Espera estendida para evitar o erro de timeout da image_8ae583.png
+            await page.wait_for_selector('input[placeholder*="Ops ID"]', timeout=60000)
+            await page.locator('input[placeholder*="Ops ID"]').fill('Ops134294')
+            await page.locator('input[placeholder*="Senha"]').fill('@Shopee123')
+            await page.locator('button:has-text("Login"), button:has-text("Entrar"), .ant-btn-primary').first.click()
             
-            # --- OPÇÃO 3: MÁSCARA/FUNDO ---
-            if not popup_closed:
-                print("3️⃣ Tentativa 3: Clicando no fundo escuro...")
-                masks = [".ant-modal-mask", ".ssc-dialog-mask", ".ssc-modal-mask"]
-                for mask in masks:
-                    if await page.locator(mask).count() > 0:
-                        try:
-                            await page.locator(mask).first.click(position={"x": 10, "y": 10}, force=True)
-                            print("✅ Clicado na máscara.")
-                            break
-                        except:
-                            pass
-            
-            await page.wait_for_timeout(2000)
-            # ==========================================================
+            print("⏳ Aguardando estabilização pós-login...")
+            await page.wait_for_timeout(15000)
+            await page.keyboard.press("Escape")
 
-            # ================== DOWNLOAD: PENDING ==================
-            print("\nIniciando Download: Base Pending")
-            await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip")
-            await page.wait_for_timeout(12000)
-
-            print("📤 Clicando em exportar (Tela Inicial)...")
-            await page.get_by_role("button", name="Exportar").nth(0).click()
-            await page.wait_for_timeout(12000)
-
-            print("📂 Indo para o centro de tarefas...")
-            await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
+            # 2. NAVEGAÇÃO E FILTRO (Idêntico ao que funcionava)
+            print("🚚 Acessando aba de Viagens...")
+            await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip", wait_until="domcontentloaded", timeout=90000)
             await page.wait_for_timeout(10000)
-            
-            # === SELEÇÃO DA ABA ===
-            print("👆 Selecionando aba de exportação...")
+
+            print("🔍 Aplicando filtro Handedover pelo XPath...")
+            # XPath vencedor
+            user_xpath = "/html/body/div/div/div[2]/div[2]/div/div/div/div[2]/div[1]/div[1]/div/div[1]/div/div/div/div/div[3]/span"
+            await page.locator(f"xpath={user_xpath}").evaluate("el => el.click()")
+            await page.wait_for_timeout(10000)
+
+            # --- A PARTIR DAQUI O SCRIPT SEGUE A LÓGICA DE EXPORTAÇÃO E DOWNLOAD ---
+            print("📤 Clicando em Exportar...")
+            await page.get_by_role("button", name="Exportar").first.evaluate("el => el.click()")
+            await page.wait_for_timeout(12000)
+
+            print("📂 Navegando para o centro de tarefas...")
+            await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter", wait_until="domcontentloaded")
+            await page.wait_for_timeout(15000)
+
             try:
-                await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click(force=True, timeout=5000)
-                print("✅ Aba selecionada/focada.")
-            except Exception:
-                print("⚠️ Aviso: Seguindo para o download direto (aba pode já estar ativa).")
+                await page.get_by_text(re.compile(r"Exportar tarefa|Export Task", re.IGNORECASE)).first.click(timeout=10000)
+            except: pass
 
-            print("⬇️ Aguardando a tabela carregar...")
-            # Esperamos o texto aparecer para garantir que o DOM existe
-            try:
-                await page.wait_for_selector("text=Baixar", timeout=20000)
-                print("✅ Lista carregada, texto 'Baixar' visível.")
-            except:
-                print("⚠️ Aviso: Texto 'Baixar' demorou, mas vamos tentar o clique JS...")
+            print("⬇️ Aguardando botão 'Baixar'...")
+            baixar_btn = page.locator("text=Baixar").first
+            await baixar_btn.wait_for(state="visible", timeout=60000)
 
-            # === DIAGNÓSTICO (PREVENÇÃO) ===
-            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_download_final.png")
-            await page.screenshot(path=debug_screenshot, full_page=True)
-            # ===============================
-
-            async with page.expect_download(timeout=60000) as download_info:
-                print("🔎 Executando clique via JavaScript (Bypass de espera de navegação)...")
-                
-                # === A MÁGICA ACONTECE AQUI ===
-                # Em vez de .click(), usamos .evaluate()
-                # Isso impede que o robô fique esperando a página recarregar infinitamente
-                await page.locator("text=Baixar").first.evaluate("element => element.click()")
-                print("✅ Comando de clique enviado.")
+            async with page.expect_download(timeout=90000) as download_info:
+                # Sua técnica de clique JS para evitar travar a navegação
+                await baixar_btn.evaluate("el => el.click()")
 
             download = await download_info.value
-            download_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
-            await download.save_as(download_path)
-
-            new_file_path = rename_downloaded_file(DOWNLOAD_DIR, download_path)
-            if new_file_path:
-                update_packing_google_sheets(new_file_path)
-
-            print("\n✅ Processo Base Pending concluído com sucesso.")
+            path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
+            await download.save_as(path)
+            
+            final_path = rename_downloaded_file_handover(DOWNLOAD_DIR, path)
+            if final_path:
+                update_google_sheets_handover(final_path)
+                print("\n🎉 PROCESSO HANDEDOVER CONCLUÍDO!")
 
         except Exception as e:
-            print(f"❌ Erro fatal durante o processo: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Erro crítico: {e}")
+            await page.screenshot(path="debug_erro.png")
         finally:
             await browser.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
