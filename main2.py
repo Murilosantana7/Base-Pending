@@ -57,8 +57,8 @@ async def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
-        # Ajuste de viewport para garantir que elementos caibam na tela
-        context = await browser.new_context(accept_downloads=True, viewport={'width': 1280, 'height': 720})
+        # Viewport maior para garantir que a tabela renderize
+        context = await browser.new_context(accept_downloads=True, viewport={'width': 1366, 'height': 768})
         page = await context.new_page()
 
         try:
@@ -79,7 +79,7 @@ async def main():
             popup_closed = False
 
             # --- OPÇÃO 1: TECLA ESC ---
-            print("1️⃣ Tentativa 1: Pressionando ESC (Método Rápido)...")
+            print("1️⃣ Tentativa 1: Pressionando ESC...")
             try:
                 viewport = page.viewport_size
                 if viewport:
@@ -141,9 +141,7 @@ async def main():
             await page.goto("https://spx.shopee.com.br/#/hubLinehaulTrips/trip")
             await page.wait_for_timeout(12000)
 
-            # Clicando no botão de exportação inicial
-            print("📤 Clicando em exportar...")
-            # Tenta clicar no primeiro botão de exportar que aparecer
+            print("📤 Clicando em exportar (Tela Inicial)...")
             await page.get_by_role("button", name="Exportar").nth(0).click()
             await page.wait_for_timeout(12000)
 
@@ -154,37 +152,34 @@ async def main():
             # === SELEÇÃO DA ABA ===
             print("👆 Selecionando aba de exportação...")
             try:
-                # Tenta clicar na aba, mas não falha se não conseguir (pode já estar nela)
+                # Clica na aba se o texto existir
                 await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click(force=True, timeout=5000)
                 print("✅ Aba selecionada/focada.")
             except Exception:
                 print("⚠️ Aviso: Seguindo para o download direto (aba pode já estar ativa).")
 
-            print("⬇️ Aguardando renderização da lista...")
-            await page.wait_for_timeout(5000) 
+            print("⬇️ Aguardando a tabela carregar...")
+            # Espera explícita para o texto "Baixar" aparecer na tela
+            try:
+                await page.wait_for_selector("text=Baixar", timeout=20000)
+                print("✅ Lista carregada, texto 'Baixar' visível.")
+            except:
+                print("⚠️ Aviso: Texto 'Baixar' demorou a aparecer. Tentando clicar mesmo assim...")
 
-            # === DIAGNÓSTICO DE TELA (IMPORTANTE) ===
-            # Isso vai salvar uma foto da tela caso o botão não seja encontrado depois
-            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_erro_tela.png")
+            # === DIAGNÓSTICO (PREVENÇÃO) ===
+            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_download_list.png")
             await page.screenshot(path=debug_screenshot, full_page=True)
-            print(f"📸 Print de diagnóstico salvo preventivamente em: {debug_screenshot}")
-            # ========================================
+            # ===============================
 
             async with page.expect_download(timeout=60000) as download_info:
-                print("🔎 Procurando botão 'Baixar' ou 'Download'...")
+                print("🔎 Clicando no PRIMEIRO 'Baixar' da lista...")
                 
-                # ESTRATÉGIA: Procura por texto, não por role, pois é mais garantido
-                # Procura 'Baixar' OU 'Download'
-                btn_locator = page.locator("text=Baixar").or_(page.locator("text=Download")).first
+                # === CORREÇÃO FINAL ===
+                # 1. Procura pelo texto exato que vimos no print
+                # 2. .first garante que pega a primeira linha
+                # 3. force=True garante o clique mesmo se for um link ou elemento não-botão
                 
-                # Verifica se encontrou algo antes de clicar
-                if await btn_locator.count() > 0:
-                    print("✅ Botão encontrado! Clicando...")
-                    await btn_locator.click(force=True)
-                else:
-                    # Tenta uma última vez pelo role button antigo
-                    print("⚠️ Texto não achado. Tentando seletor antigo de botão...")
-                    await page.get_by_role("button", name="Baixar").nth(0).click(force=True)
+                await page.locator("text=Baixar").first.click(force=True)
 
             download = await download_info.value
             download_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
