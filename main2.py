@@ -57,7 +57,8 @@ async def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context(accept_downloads=True)
+        # Ajuste de viewport para garantir que elementos caibam na tela
+        context = await browser.new_context(accept_downloads=True, viewport={'width': 1280, 'height': 720})
         page = await context.new_page()
 
         try:
@@ -142,27 +143,48 @@ async def main():
 
             # Clicando no botão de exportação inicial
             print("📤 Clicando em exportar...")
+            # Tenta clicar no primeiro botão de exportar que aparecer
             await page.get_by_role("button", name="Exportar").nth(0).click()
             await page.wait_for_timeout(12000)
 
             print("📂 Indo para o centro de tarefas...")
             await page.goto("https://spx.shopee.com.br/#/taskCenter/exportTaskCenter")
-            await page.wait_for_timeout(15000)
+            await page.wait_for_timeout(10000)
             
-            # === CORREÇÃO DE TIMEOUT ===
+            # === SELEÇÃO DA ABA ===
             print("👆 Selecionando aba de exportação...")
             try:
-                # Usamos force=True para ignorar sobreposições.
-                # Usamos timeout curto (5s) pois se falhar, provavelmente já estamos na aba certa.
+                # Tenta clicar na aba, mas não falha se não conseguir (pode já estar nela)
                 await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click(force=True, timeout=5000)
                 print("✅ Aba selecionada/focada.")
-            except Exception as e:
-                print(f"⚠️ Aviso (Não crítico): Não foi possível clicar na aba 'Exportar tarefa'. Tentando baixar direto... Erro: {e}")
+            except Exception:
+                print("⚠️ Aviso: Seguindo para o download direto (aba pode já estar ativa).")
 
-            print("⬇️ Aguardando download...")
+            print("⬇️ Aguardando renderização da lista...")
+            await page.wait_for_timeout(5000) 
+
+            # === DIAGNÓSTICO DE TELA (IMPORTANTE) ===
+            # Isso vai salvar uma foto da tela caso o botão não seja encontrado depois
+            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_erro_tela.png")
+            await page.screenshot(path=debug_screenshot, full_page=True)
+            print(f"📸 Print de diagnóstico salvo preventivamente em: {debug_screenshot}")
+            # ========================================
+
             async with page.expect_download(timeout=60000) as download_info:
-                # force=True aqui também para garantir o clique no botão Baixar
-                await page.get_by_role("button", name="Baixar").nth(0).click(force=True)
+                print("🔎 Procurando botão 'Baixar' ou 'Download'...")
+                
+                # ESTRATÉGIA: Procura por texto, não por role, pois é mais garantido
+                # Procura 'Baixar' OU 'Download'
+                btn_locator = page.locator("text=Baixar").or_(page.locator("text=Download")).first
+                
+                # Verifica se encontrou algo antes de clicar
+                if await btn_locator.count() > 0:
+                    print("✅ Botão encontrado! Clicando...")
+                    await btn_locator.click(force=True)
+                else:
+                    # Tenta uma última vez pelo role button antigo
+                    print("⚠️ Texto não achado. Tentando seletor antigo de botão...")
+                    await page.get_by_role("button", name="Baixar").nth(0).click(force=True)
 
             download = await download_info.value
             download_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
