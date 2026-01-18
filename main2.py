@@ -152,34 +152,32 @@ async def main():
             # === SELEÇÃO DA ABA ===
             print("👆 Selecionando aba de exportação...")
             try:
-                # Clica na aba se o texto existir
                 await page.get_by_text("Exportar tarefa").or_(page.get_by_text("Export Task")).click(force=True, timeout=5000)
                 print("✅ Aba selecionada/focada.")
             except Exception:
                 print("⚠️ Aviso: Seguindo para o download direto (aba pode já estar ativa).")
 
             print("⬇️ Aguardando a tabela carregar...")
-            # Espera explícita para o texto "Baixar" aparecer na tela
+            # Esperamos o texto aparecer para garantir que o DOM existe
             try:
                 await page.wait_for_selector("text=Baixar", timeout=20000)
                 print("✅ Lista carregada, texto 'Baixar' visível.")
             except:
-                print("⚠️ Aviso: Texto 'Baixar' demorou a aparecer. Tentando clicar mesmo assim...")
+                print("⚠️ Aviso: Texto 'Baixar' demorou, mas vamos tentar o clique JS...")
 
             # === DIAGNÓSTICO (PREVENÇÃO) ===
-            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_download_list.png")
+            debug_screenshot = os.path.join(DOWNLOAD_DIR, "debug_download_final.png")
             await page.screenshot(path=debug_screenshot, full_page=True)
             # ===============================
 
             async with page.expect_download(timeout=60000) as download_info:
-                print("🔎 Clicando no PRIMEIRO 'Baixar' da lista...")
+                print("🔎 Executando clique via JavaScript (Bypass de espera de navegação)...")
                 
-                # === CORREÇÃO FINAL ===
-                # 1. Procura pelo texto exato que vimos no print
-                # 2. .first garante que pega a primeira linha
-                # 3. force=True garante o clique mesmo se for um link ou elemento não-botão
-                
-                await page.locator("text=Baixar").first.click(force=True)
+                # === A MÁGICA ACONTECE AQUI ===
+                # Em vez de .click(), usamos .evaluate()
+                # Isso impede que o robô fique esperando a página recarregar infinitamente
+                await page.locator("text=Baixar").first.evaluate("element => element.click()")
+                print("✅ Comando de clique enviado.")
 
             download = await download_info.value
             download_path = os.path.join(DOWNLOAD_DIR, download.suggested_filename)
